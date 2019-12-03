@@ -1,0 +1,11 @@
+*.csv
+*.d
+*.eep
+*.elf
+*.hex
+*.map
+*.o
+*.geany
+.config*
+include/config
+include/generated
