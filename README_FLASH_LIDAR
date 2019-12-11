@@ -1,1 +1,0 @@
-sudo avrdude -v -v -p atxmega32a4 -c avrispmkII -U flash:w:cortex.hex:i
