@@ -65,6 +65,15 @@ static int stm32_uart_getchar(FILE *stream)
 
 /* LIDAR USAR MGMT */
 
+void lidar_scanf(const char* fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	vfscanf(&lidar_uart_fdstream, fmt, args);
+	va_end(args);
+}
+
 int lidar_putchar(char c)
 {
 	return lidar_uart_putchar(c, &lidar_uart_fdstream);
@@ -93,6 +102,15 @@ void lidar_console_init(console_t *con)
 }
 
 /* STM32 USART MGMT */
+
+void stm32_printf(const char* fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	vfprintf(&stm32_uart_fdstream, fmt, args);
+	va_end(args);
+}
 
 int stm32_putchar(char c)
 {

@@ -9,25 +9,6 @@
 #include "msched.h"
 #include "platform.h"
 
-static void mach_pinmux_setup(void)
-{
-#if defined(__AVR__)
-	/* analog to digital conversion */
-	PORTA.DIR = 0x00; /*!< PORTA as input pin */
-	PORTA.OUT = 0x00;
-	PORTA.PIN0CTRL = PORT_ISC_INPUT_DISABLE_gc;
-
-	/* Port B - Jtag disable (fuse bit required) */
-	MCU_MCUCR = MCU_JTAGD_bm; /* Fuse4 bit0 to set to 1 with flasher */
-
-	/* twi configuration pin */
-	PORTC.DIRSET = PIN1_bm; /*!< PC1 (SCL) as output pin */
-	/* usart configuration pin */
-	PORTC.DIRCLR = PIN2_bm; /*!< PC2 (RDX0) as input pin */
-	PORTC.DIRSET = PIN3_bm; /*!< PC3 (TXD0) as output pin */
-#endif
-}
-
 void mach_sched_init()
 {
 	msched_init(10/*ms*/, &TCC0);
@@ -81,19 +62,18 @@ void mach_setup(void)
 	/* Global interrupt enable */
 	sei();
 	
-	/*
-	 * TODO: Use USARTS in interrupt mode 
-	 */
-
 	uint8_t led_state = 0;
-	//uint8_t lidar_data = 0;
-	//uint8_t stm32_data = 0;
+	uint8_t lidar_data = 0;
+	uint8_t status = 0;
+	uint8_t strength_warning = 0;
+	uint8_t invalid_data = 0;
+	lidar_frame frame = { 0 };
 
 	//for(;;) {
-		gpio_set_output(&PORTB, PIN0_bp, led_state);
-		led_state = !led_state;
-		for (uint32_t i = 0; i < 0x1ffff; i++)
-			__asm__ volatile ("nop");
+		//gpio_set_output(&PORTB, PIN0_bp, led_state);
+		//led_state = !led_state;
+		//for (uint32_t i = 0; i < 0x1ffff; i++)
+		//	__asm__ volatile ("nop");
 		//dump_lidar();
 		//stm32_data = stm32_getchar();
 		//if(stm32_data == 0x64) {
@@ -106,24 +86,121 @@ void mach_setup(void)
 
 	while(1) 
 	{
+		lidar_data = lidar_getchar();
+		switch(status) {
+			case 0:
+				if(lidar_data == 0xFA) {
+					status = 1;
+				}
+				break;
+			case 1:
+				//if(lidar_data >= 0xA0 && lidar_data <= 0xF9) {
+				if(lidar_data == 0xA0) {
+					frame.index = lidar_data;// - 0xA0;
+					status = 2;
+					//stm32_putchar(index);
+				} else {
+					if(lidar_data != 0xFA) {
+						status = 0;
+					}
+				}
+				break;
+			case 2:
+				frame.speed = lidar_data;
+				frame.speed <<= 8;
+				frame.speed |= lidar_getchar();
+
+				for(int i = 0; i < 4; i++)
+				{
+					frame.angles[i].distance = lidar_getchar();
+					frame.angles[i].distance <<= 8;
+					frame.angles[i].distance |= lidar_getchar();
+
+					frame.angles[i].signal_strength = lidar_getchar();
+					frame.angles[i].signal_strength <<= 8;
+					frame.angles[i].signal_strength |= lidar_getchar();
+
+					strength_warning = 0x40 & (frame.angles[i].distance >> 8);
+					strength_warning >>= 6;
+
+					invalid_data = 0x80 & (frame.angles[i].distance >> 8);
+					invalid_data >>= 7;
+
+					//frame.angles[i].distance &= ~0xC000;
+				}
+				frame.checksum = lidar_getchar();
+				frame.checksum <<= 8;
+				frame.checksum |= lidar_getchar();
+
+				stm32_printf("\nframe:\n");
+				stm32_printf("\tindex:0x%X\n", frame.index);
+				stm32_printf("\tspeed:0x%X\n", frame.speed);
+				for(int i = 0; i < 4; i++) {
+					stm32_printf("\tangle[%d]:0x%X - brut: 0x%X\n", (frame.index - 0xA0) * 4 + i, frame.angles[i].distance & ~0xC000, frame.angles[i].distance);
+					stm32_printf("\t\tsignal_strength:0x%X, warning:0x%X, invalid_data:0x%X\n", frame.angles[i].signal_strength, strength_warning, invalid_data);
+				}
+				stm32_printf("\tchecksum:0x%X\t calculated:0x%X\t", frame.checksum, checksum(frame));
+
+				//stm32_putchar(angle1);
+				//stm32_putchar(angle2);
+				//stm32_putchar(angle3);
+				//stm32_putchar(angle4);
+
+				/* TODO:
+					* checksum calcul
+					* "printfize" those ugly putchar and getchar
+					* get angle values
+					* Store angle values into an array of 360
+				*/
+
+				/* Reset status */
+				status = 0;
+				while (1) {};
+				break;
+			default:
+				/* Reset status */
+				status = 0;
+				break;
+		}
+		//stm32_putchar(lidar_data);
 	}
 
 	return;
 }
 
+uint16_t checksum(lidar_frame frame)
+{
+	uint32_t chk32 = 0;
+	uint16_t word;
+	uint8_t* data = &frame;
+	int i;
+
+	frame.start = 0xFA;
+
+	for(i=0; i<10; i++) { 
+		stm32_printf("chks - 0x%X - 0x%X\n", data[2*i], data[2*i+1]);
+		word=data[2*i] + (data[2*i+1] << 8);
+		chk32 = (chk32 << 1) + word;
+	}
+	
+	uint32_t checksum=(chk32 & 0x7FFF) + (chk32 >> 15);
+	return checksum & 0x7FFF;	
+}
+
+
 void dump_lidar(void)
 {
 	//uint8_t values[10];
-	uint32_t index = 0;
-	uint8_t tmp = 0;
-	
+	uint16_t index = 0;
+	uint8_t tmp = 'a';
 	
 	//stm32_putchar(0xEE);
-	for (index = 0; index < 42; index++) {
-		tmp = (uint8_t) lidar_getchar();
-		stm32_putchar(tmp);
-	}
-	stm32_putchar('\n');
+	//for (index = 0; index < 26; index++) {
+	//	stm32_putchar(tmp);
+	//	tmp++;
+	//}
+	//stm32_putchar('\n');
+	stm32_printf("This is a test i:%d,%d c:%c s:%s !\n", index, 7, 'r', "coucou");
 }
 
 /* USARTC1 reception interrupt - STM32 Input */
@@ -136,11 +213,12 @@ ISR(USARTC1_RXC_vect)
 	
 	recvByte = USARTC1.DATA;
 
-	stm32_putchar(recvByte);
+	//stm32_putchar(recvByte);
 	//dump_lidar();
 	//stm32_putchar('\n');
-	//if (recvByte == 't') {
-	////	///dump_lidar();
+	if (recvByte == 't') {
+	    dump_lidar();
+	}
 	//	stm32_putchar('c');
 	//} else {
 	//	stm32_putchar('t');

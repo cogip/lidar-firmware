@@ -29,6 +29,8 @@ int cons_scanf(const char *fmt, ...);
 #endif
 
 /* LIDAR USART */
+void lidar_scanf(const char *fmt, ...);
+
 int lidar_getchar();
 
 int lidar_putchar(char c);
@@ -38,6 +40,8 @@ int lidar_is_data_arrived();
 void lidar_console_init(console_t *con);
 
 /* STM32 USART */
+void stm32_printf(const char *fmt, ...);
+
 int stm32_getchar();
 
 int stm32_putchar(char c);

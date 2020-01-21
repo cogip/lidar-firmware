@@ -97,14 +97,13 @@ void stm32_usart_setup(usart_t *usart, uint32_t baudrate)
 	/* mode operation : asynchronous mode */
 	usart->CTRLC |= USART_CMODE_ASYNCHRONOUS_gc;
 
-	/* Enable receive interruption (sets at HIGH priority). */
-	//usart->CTRLA |= USART_RXCINTLVL_LO_gc;
-
 	/* Set interrupt level of RX Int to low */
 	usart->CTRLA = (usart->CTRLA & ~USART_RXCINTLVL_gm) | USART_RXCINTLVL_LO_gc;
+
 	/* Enable both RX and TX. */
 	usart->CTRLB = USART_TXEN_bm | USART_RXEN_bm;
 	
+	/* Useful for interruption */
 	PMIC.CTRL |= PMIC_LOLVLEN_bm;
 }
 /* transmit a char */
