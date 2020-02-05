@@ -25,6 +25,7 @@ void mach_tasks_init();
 void mach_sched_init();
 void mach_sched_run();
 
+void print_raw_data_lidar();
 void dump_lidar();
 uint16_t checksum(lidar_frame frame);
 

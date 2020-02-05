@@ -84,6 +84,7 @@ void mach_setup(void)
 		//}
 	//}
 
+#if 0
 	while(1) 
 	{
 		lidar_data = lidar_getchar();
@@ -153,17 +154,19 @@ void mach_setup(void)
 					* Store angle values into an array of 360
 				*/
 
-				/* Reset status */
+				// Reset status
 				status = 0;
 				while (1) {};
 				break;
 			default:
-				/* Reset status */
+				// Reset status
 				status = 0;
 				break;
 		}
-		//stm32_putchar(lidar_data);
 	}
+#else
+print_raw_lidar_data();
+#endif
 
 	return;
 }
@@ -187,6 +190,54 @@ uint16_t checksum(lidar_frame frame)
 	return checksum & 0x7FFF;	
 }
 
+void print_raw_lidar_data(void)
+{
+	uint8_t status = 0;
+	uint8_t index = 0;
+	uint8_t lidar_b1 = 0;
+	uint8_t lidar_b2 = 0;
+	uint8_t lidar_data = 0;
+
+	while (1) {
+		// switch(status) {
+		// 	case 0:
+		// 		lidar_b1 = lidar_getchar();
+		// 		lidar_b2 = lidar_getchar();
+		// 		if(lidar_b1 == 0xFA && (lidar_b2 == 0xA0 || lidar_b2 == 0xA1)) {
+		// 			stm32_printf("%02X%02X\t", lidar_b1, lidar_b2);
+		// 			status = 2;
+		// 		}
+		// 		break;
+		// 	case 1:
+		// 		//if(lidar_data >= 0xA0 && lidar_data <= 0xF9) {
+		// 		if(lidar_data == 0xA0) {
+		// 			stm32_printf("FA%02X\t", lidar_data);
+		// 			status = 2;
+		// 			//stm32_putchar(index);
+		// 		} else {
+		// 			if(lidar_data != 0xFA) {
+		// 				status = 0;
+		// 			}
+		// 		}
+		// 		break;
+		// 	case 2:
+		// 		lidar_data = lidar_getchar();
+		// 		stm32_printf("%02X", lidar_data);
+		// 		index++;
+		// 		if(index % 2 == 0) {
+		// 			stm32_printf("\t");
+		// 		}
+		// 		if(index == 26) {
+		// 			stm32_printf("\n");
+		// 			status = 0;
+		// 		}
+		// 		break;
+		// 	default:
+		// 		break;
+		// }
+		printf("%02X\n", lidar_getchar());
+	}
+}
 
 void dump_lidar(void)
 {
