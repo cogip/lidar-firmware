@@ -5,6 +5,7 @@
 #include "usart.h"
 
 #include "console.h"
+#include "hwtimer.h"
 #include "kos.h"
 #include "msched.h"
 #include "platform.h"
@@ -43,8 +44,14 @@ void mach_setup(void)
 
 	/* LIDAR alimentation */
 	gpio_set_direction(&PORTD, PIN0_bp, GPIO_DIR_OUT);
-	gpio_set_output(&PORTD, PIN0_bp, 1);
 	
+	/* Setup PWM to manage rotation speed of the lidar */
+	timer_pwm_mode_setup(&TCD0, 200, TC_CLKSEL_DIV8_gc);
+	timer_pwm_enable(&TCD0, PIN0_bp);
+
+	/* We want it at 300rpm - full modulation (255) = 480rpm -> 300rpm = 155 */
+	timer_pwm_duty_cycle(&TCD0, PIN0_bp, 155);
+
 	/* usart 0 configuration pin - LIDAR data */
 	PORTC.DIRCLR = PIN2_bm; /*!< PC3 (RXC0) as input pin */
 	PORTC.DIRSET = PIN3_bm; /*!< PC4 (TXC0) as output pin */
@@ -63,11 +70,14 @@ void mach_setup(void)
 	sei();
 	
 	uint8_t led_state = 0;
-	uint8_t lidar_data = 0;
+	uint8_t data = 0;
 	uint8_t status = 0;
 	uint8_t strength_warning = 0;
 	uint8_t invalid_data = 0;
-	lidar_frame frame = { 0 };
+	uint8_t frame[22];
+
+	is_reading = FALSE;
+	distance[10] = 10;
 
 	//for(;;) {
 		//gpio_set_output(&PORTB, PIN0_bp, led_state);
@@ -84,86 +94,74 @@ void mach_setup(void)
 		//}
 	//}
 
-#if 0
+#if 1
 	while(1) 
 	{
-		lidar_data = lidar_getchar();
-		switch(status) {
-			case 0:
-				if(lidar_data == 0xFA) {
-					status = 1;
-				}
-				break;
-			case 1:
-				//if(lidar_data >= 0xA0 && lidar_data <= 0xF9) {
-				if(lidar_data == 0xA0) {
-					frame.index = lidar_data;// - 0xA0;
-					status = 2;
-					//stm32_putchar(index);
-				} else {
-					if(lidar_data != 0xFA) {
-						status = 0;
-					}
-				}
-				break;
-			case 2:
-				frame.speed = lidar_data;
-				frame.speed <<= 8;
-				frame.speed |= lidar_getchar();
+        switch(status){
+            case 0:
+                data = lidar_getchar();
+                if(data == 0xFA) {
+                    //printf("%02X\n", data);
+                    if(is_reading == FALSE)
+                         status = 1;
+                }
+                break;
+            case 1:
+                data = lidar_getchar();
+                if(data >= 0xA0 && data <= 0xF9) {
+                //if(data == 0xD1) {
+                    //printf("FA\n");
+                    //printf("%02X\n", data);
+                    frame[0] = 0xFA;
+                    frame[1] = data;
+                    status = 2;
+                } else {
+                    status = 0;
+                }
+                break;
+            case 2:
+                for(uint8_t i = 0; i < 20; i++) {
+                    data = lidar_getchar();
+                    frame[i+2] = data;
+                    //printf("%02X\n", data);
+                }
 
-				for(int i = 0; i < 4; i++)
-				{
-					frame.angles[i].distance = lidar_getchar();
-					frame.angles[i].distance <<= 8;
-					frame.angles[i].distance |= lidar_getchar();
-
-					frame.angles[i].signal_strength = lidar_getchar();
-					frame.angles[i].signal_strength <<= 8;
-					frame.angles[i].signal_strength |= lidar_getchar();
-
-					strength_warning = 0x40 & (frame.angles[i].distance >> 8);
-					strength_warning >>= 6;
-
-					invalid_data = 0x80 & (frame.angles[i].distance >> 8);
-					invalid_data >>= 7;
-
-					//frame.angles[i].distance &= ~0xC000;
-				}
-				frame.checksum = lidar_getchar();
-				frame.checksum <<= 8;
-				frame.checksum |= lidar_getchar();
-
-				stm32_printf("\nframe:\n");
-				stm32_printf("\tindex:0x%X\n", frame.index);
-				stm32_printf("\tspeed:0x%X\n", frame.speed);
-				for(int i = 0; i < 4; i++) {
-					stm32_printf("\tangle[%d]:0x%X - brut: 0x%X\n", (frame.index - 0xA0) * 4 + i, frame.angles[i].distance & ~0xC000, frame.angles[i].distance);
-					stm32_printf("\t\tsignal_strength:0x%X, warning:0x%X, invalid_data:0x%X\n", frame.angles[i].signal_strength, strength_warning, invalid_data);
-				}
-				stm32_printf("\tchecksum:0x%X\t calculated:0x%X\t", frame.checksum, checksum(frame));
-
-				//stm32_putchar(angle1);
-				//stm32_putchar(angle2);
-				//stm32_putchar(angle3);
-				//stm32_putchar(angle4);
-
-				/* TODO:
-					* checksum calcul
-					* "printfize" those ugly putchar and getchar
-					* get angle values
-					* Store angle values into an array of 360
-				*/
-
-				// Reset status
-				status = 0;
-				while (1) {};
-				break;
-			default:
-				// Reset status
-				status = 0;
-				break;
-		}
-	}
+                //for(int i = 0; i < 22; i++) {
+                //    printf("%02X\n", frame[i]);
+                //}
+                uint16_t crc_frame = frame[20] + (frame[21] << 8);
+                if(crc_calc(frame) == crc_frame) {
+                    //printf("crc OK !\n");
+                    uint16_t speed = frame[2] + (frame[3] << 8);
+                    //stm32_printf("speed: %04X - %u - %u tr/min\n", speed, speed, speed / 60);
+                    //uint16_t distance[4];
+                    for(uint8_t i = 1; i < 5; i++) {
+                        //printf("dist: %02X - bit7: %02X\n", frame[4*i+1], frame[4*i+1] & 0x80);
+                        if((frame[4*i+1] & 0x80) == 0x80) {
+                            //stm32_printf("No angle - trame: %02X\n", frame[1]);
+                            //stm32_printf("x0: %02X - x1: %02X - x2: %02X - x3: %02X\n", frame[i*4], frame[4*i+1], frame[4*i+2], frame[4*i+3]);
+                        } else {
+                            //stm32_printf("Angle ok - trame: %02X\n", frame[1]);
+                            uint8_t tmp = frame[4*i+1] & 0x3F;
+                            uint16_t dist = frame[4*i] + (tmp << 8);
+                            uint16_t index = frame[1] - 0xA0;
+                            index = index * 4 + (i - 1);
+                            distance[index] = dist;
+                            if(index == 0)
+                                stm32_printf("0: %u\n", distance[0]);
+                            //stm32_printf("b0: %02X - b1: %02X - tmp: %02X - dist: %04X -> %u\n", frame[i*4], frame[4*i+1], tmp, dist, dist);
+                        }
+                    }
+                } else {
+                    //stm32_printf("crc KO ! - trame: %02X\n", frame[1]);
+                }
+                //exit(0);
+                status = 0;
+                break;
+            default:
+                break;
+        }
+    }
 #else
 print_raw_lidar_data();
 #endif
@@ -171,23 +169,18 @@ print_raw_lidar_data();
 	return;
 }
 
-uint16_t checksum(lidar_frame frame)
-{
-	uint32_t chk32 = 0;
-	uint16_t word;
-	uint8_t* data = &frame;
-	int i;
+uint16_t crc_calc(unsigned char frame[]) {
+    uint32_t chk32 = 0;
+    uint16_t word = 0;
 
-	frame.start = 0xFA;
+    for(uint8_t i = 0; i < 10; i++) {
+        word = frame[2*i] + (frame[2*i+1] << 8);
+        chk32 = (chk32 << 1) + word;
+    }
 
-	for(i=0; i<10; i++) { 
-		stm32_printf("chks - 0x%X - 0x%X\n", data[2*i], data[2*i+1]);
-		word=data[2*i] + (data[2*i+1] << 8);
-		chk32 = (chk32 << 1) + word;
-	}
-	
-	uint32_t checksum=(chk32 & 0x7FFF) + (chk32 >> 15);
-	return checksum & 0x7FFF;	
+    uint32_t checksum = (chk32 & 0x7FFF) + (chk32 >> 15);
+
+    return checksum & 0x7FFF;
 }
 
 void print_raw_lidar_data(void)
@@ -257,23 +250,20 @@ void dump_lidar(void)
 /* USARTC1 reception interrupt - STM32 Input */
 ISR(USARTC1_RXC_vect)
 {
-	//if (irq_tcc0_ovf_handler)
-	//	irq_tcc0_ovf_handler();
 	char recvByte;
-	gpio_set_output(&PORTB, PIN0_bp, 1);
 	
 	recvByte = USARTC1.DATA;
 
-	//stm32_putchar(recvByte);
-	//dump_lidar();
-	//stm32_putchar('\n');
-	if (recvByte == 't') {
-	    dump_lidar();
+	if (recvByte == 'd') {
+		is_reading = TRUE;
+		stm32_printf("\nDUMP Distance array:\n");
+		for(uint16_t i=0; i<360; i++) {
+			stm32_printf("%u\t", distance[i]);
+			if(i % 10 == 0 && i != 0)
+				stm32_printf("\n");
+		}
+		is_reading = FALSE;
 	}
-	//	stm32_putchar('c');
-	//} else {
-	//	stm32_putchar('t');
-	//}
 }
 
 /* USARTC1 transmission interrupt - STM32 Output */
